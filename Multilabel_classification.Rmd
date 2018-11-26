@@ -1,0 +1,281 @@
+---
+title: "Multi-label classification"
+author: "Fridah Wanjala"
+date: "5/25/2018"
+output:
+  beamer_presentation: default
+  ioslides_presentation: default
+  slidy_presentation: default
+---
+
+```{r setup, include=FALSE}
+#--------------------------------------------------------------------
+# 0. Set Work environment
+#--------------------------------------------------------------------
+# a. Setting the working directory
+# drop all objects from memory
+rm(list = ls())
+
+# set working directory to project root folder
+basedir <- "/Users/fridah/Documents/Other/Learnings/Multilabel-classification/"
+knitr::opts_knit$set(root.dir = basedir)
+knitr::opts_chunk$set(echo = TRUE)
+
+# b. Load required dependencies
+# list of packages
+pkgs<-c("dplyr","ggplot2","mlr", "caret", "lubridate", "mldr", 
+        "randomForestSRC", "caret")
+
+# Checking the packages that are not installed and installing them
+miss_pkgs<-pkgs[!pkgs %in% installed.packages()[,1]]
+tryCatch(
+install.packages(miss_pkgs, source = TRUE), error = function(e){})
+
+# loading all the packages that installed
+load_pkgs <- pkgs[pkgs %in% installed.packages()[,1]]
+invisible(lapply(load_pkgs, library, character.only=TRUE))
+
+# c. Load the data
+ckd <- read.csv(paste(basedir, "RawData/chronic_kidney_disease.arff", sep=""),
+                header=F, comment.char="@", na.strings=c("?","","\t?"))
+```
+
+## Introduction
+
+![](/Users/fridah/Documents/Other/Learnings/Multilabel-classification/RawData/img.png)
+
+What about this
+========================================================
+![](/Users/fridah/Documents/Other/Learnings/Multilabel-classification/RawData/car.jpeg)
+
+Multi-Class vs Multi-Label
+========================================================
+We are used to carrying out supervised learning using single label classifcation : 
+
++ Binary Classification Problem
+
++ Multiclass Classification Problem 
+
+Single label : there are multiple categories but each instance is assigned only one
+
+Multi-Label : each instance can be assigned with multiple categories
+
+Pictogram
+========================================================
+![](/Users/fridah/Documents/Other/Learnings/Multilabel-classification/RawData/tables.png)
+
+
+Applications
+========================================================
++ Text categorization
+Movie plot summaries can be associated with several genres
+
+![](/Users/fridah/Documents/Other/Learnings/Multilabel-classification/RawData/imdb.png)
+
+Applications
+========================================================
++ Medical diagnosis
+Medical history and symptoms could be associated with different ailments
+![](/Users/fridah/Documents/Other/Learnings/Multilabel-classification/RawData/stetho.png)
+
+ + Others:
+  - Image anootation
+ 
+  - Audio and video description
+ 
+  - Bioinformatics - classification of genes
+
+Methods
+========================================================
+There are three methods to solve a multi-label classification problem,:
+
++ Problem Transformation : try to transform the multilabel classification into binary or multiclass classification problems
+
++ Adapted Algorithm : adapt multiclass algorithms so they can be applied directly to the problem. For example KNN, Rndom forests, SVM
+
++ Ensemble approaches
+
+Problem Transformation
+========================================================
+ + Binary Relevance (BR): 
+ Basically treats each label as a separate single class classification problem.
+ ![](/Users/fridah/Documents/Other/Learnings/Multilabel-classification/RawData/br.png)
+
+Each of the binary classifiers votes separately to get the final result. 
+
+Problem Transformation
+========================================================
+ + Classifier Chains (CC): 
+Similar to BR, a ML problem is transformed into single label probems. Here the first classifier is trained just on the input data and then each next classifier is trained on the input data and all the previous classifiers in the chain. 
+ ![](/Users/fridah/Documents/Other/Learnings/Multilabel-classification/RawData/cc.png)
+
+
+
+ + It achieves higher predictive performance than BR
+ 
+ + Preserves label correlation
+
+Problem Transformation
+========================================================
+ + Label Power set (LP) : 
+Generates a new class for every combination of labels and then solves the problem using multiclass classification approaches.
+
+![](/Users/fridah/Documents/Other/Learnings/Multilabel-classification/RawData/lp1.png)
+
+![](/Users/fridah/Documents/Other/Learnings/Multilabel-classification/RawData/lp2.png)
+
+Gives highest accuracy 
+
+Drawbacks : the exponential growth in the number of classes, leads to several generated classes having very few labeled instances leading to overfitting. 
+
+Performance Metrics
+========================================================
+ + Accuracy : proportion of correctly predicted labels with respect to the total
+number of labels for each instance
+ 
+ + Hamming-loss :  symmetric difference between predicted and true labels and divided by the total number of labels in the MLD. The smaller the value of hamming loss, better the performance. 
+ 
+Case study
+========================================================
+Objective: 
+The main objective of this study is to develop a classification rule that allows to correctly identify a patient with Chronic kidney disease (CKD) based on physical symptoms and data from blood analysis.
+
+These algorithms allow to classify CKD, Hypertension and Diabetes as unified pathological entity since Hypertension and Diabetes could be underlying causes or complication of CKD.
+
+Case study
+========================================================
+Study:
+In the study physical symptoms, clinical and blood test data were recorded from 401 patients. 250 patients had Chronic kidney disease (CKD), 147 patients were diagnosed with Hypertension and Diabetes has been diagnosed in 137 patients.
+
+[Data Source](https://archive.ics.uci.edu/ml/datasets/Chronic_Kidney_Disease#)
+
+```{r, echo=FALSE}
+names(ckd) <- c("Age","BP","SPG","Albumin","Sugar","RBC","PC","PCC","Bact","BGlu","BUrea","SerCreat","Sodium","K","Hb","PCV","WBC","RBCCount","HTA","DIA","CAD","APP","PedEdema","Anemia","CKD")
+
+ckd$DIA <- recode_factor(ckd$DIA,`yes`="TRUE",`no`="FALSE",`\tno`="FALSE",`\tyes`="TRUE",` yes`="TRUE") %>% as.logical()
+
+ckd$CKD <- recode_factor(ckd$CKD,`ckd`="TRUE",`no`="FALSE",`ckd\t`="TRUE",`notckd`="FALSE")%>%as.logical()
+
+ckd$HTA <- recode_factor(ckd$HTA,`yes`="TRUE",`no`="FALSE")%>%as.logical()
+
+ckd$Age <- recode_factor(ckd$Age,`notckd`="NA")%>%as.numeric()
+
+df <- ckd %>%
+  select(Age,BP,RBCCount,SPG,Albumin,Sugar,PC,PCC,Bact,BGlu,BUrea,
+         SerCreat,Sodium,K,Hb,PCV,WBC,Anemia,PedEdema,DIA,
+         HTA,CKD)
+
+df <- subset(df, DIA!="NA" & HTA!="NA" & CKD!="NA")
+
+df <- df %>%
+  mutate(BP = as.numeric(BP),
+         Albumin = as.numeric(Albumin),
+         Sugar = as.numeric(Sugar),
+         BGlu = as.numeric(BGlu),
+         PCV = as.numeric(PCV),
+         WBC = as.numeric(WBC))
+
+rm(ckd)
+
+knitr::kable(df %>% select(Age, BP, DIA, HTA, CKD) %>% head())
+```
+
+Data exploration
+========================================================
+Data format : Each label should be coded as TRUE or FALSE
+
+Using `mldr_from_dataframe` from the `mldr` package we generate an mldr object from a data.frame and a vector with label indices
+```{r, echo=FALSE}
+datamldr <- mldr_from_dataframe(df,labelIndices=c(20:22))
+plot(type="LC", datamldr, color.function = rainbow)
+```
+
+Creating a task
+========================================================
+Create a MultilabelTask - specify a vector of targets which correspond to the names of logical variables in the data.frame
+```{r, echo=FALSE}
+#drop unsused levels
+df$PedEdema <- droplevels(df$PedEdema)
+
+labels <- c("DIA","HTA","CKD")
+df.task = makeMultilabelTask(id = "multi", data = df, target = labels)
+df.task
+
+# create training and test data
+set.seed(123)
+ids <- createDataPartition(df$CKD, p=0.70, list=FALSE)
+train <- df[ids,]
+test <- df[-ids,]
+train.set <- row.names(train)%>%as.integer()
+
+```
+Create a learner
+========================================================
+Use the `makeLearner` function to create a learner for your probelm. All classification learners start with `classif.` all regression learners with `regr.` all survival learners start with `surv.` all clustering learners with `cluster.`
+
+```{r, echo=FALSE}
+# Algorithm adaptation methods
+lrn.rf = makeLearner("multilabel.randomForestSRC",predict.type = "prob")
+print("Algorithm adaptation methods: Randomforest")
+lrn.rf
+
+#Problem transformation methods
+lrn.prm <- makeLearner("classif.rpart", predict.type = "prob")
+lrn.br <- makeMultilabelBinaryRelevanceWrapper(lrn.prm) 
+
+# Problem transformation methods: CC
+lrn.cc <- makeMultilabelClassifierChainsWrapper(lrn.prm)
+
+```
+
+Train and Predict
+========================================================
+You can train a model as usual with a multilabel learner and a multilabel task as input.
+
+Using `mlr`'s `predict` command, pass the trained model and either the task to the task argument or some new data to the newdata argument.
+
+```{r, echo=FALSE}
+### Train
+# Algorithm adaptation methods - RF
+mod.rf <- mlr::train(lrn.rf, df.task, subset = train.set)
+
+# Problem transformation methods: BR
+mod.br <- mlr::train(lrn.br, df.task, subset = train.set)
+
+# Problem transformation methods: CC
+mod.cc <- mlr::train(lrn.cc, df.task, subset = train.set)
+
+### Predict
+# Algorithm adaptation methods - RF
+pred.rf = predict(mod.rf, newdata = test)
+knitr::kable(head(as.data.frame(pred.rf), 5))
+
+# Problem transformation methods: BR
+pred.br = predict(mod.br, newdata = test)
+
+# Problem transformation methods: CC
+pred.cc = predict(mod.cc, newdata = test)
+```
+
+Performance
+========================================================
+```{r, echo=FALSE}
+# list of measures
+measures <- list(multilabel.acc,multilabel.hamloss,multilabel.ppv,multilabel.tpr)
+
+# compute performance metrics
+performance <- as.data.frame(rbind(round(performance(pred.rf,measures),2),
+                                round(performance(pred.br,measures),2),
+                                round(performance(pred.cc,measures),2)))
+
+performance$model <- c("RandomForest","Binaryrelevance","ClassifierChains")
+
+knitr::kable(performance %>%
+               select(model, everything()))
+```
+
+References
+[Multilabel example] (https://rpubs.com/ledongnhatnam/259348)
+[Multilabel documentation] (https://mlr-org.github.io/mlr-tutorial/devel/html/multilabel/index.html)
+[Intergrated learners] (http://mlr-org.github.io/mlr-tutorial/release/html/integrated_learners/)
+
